@@ -1,1 +1,653 @@
+//@version=6
+indicator("🐼 Ghost Trendilo PRO", overlay=true, max_lines_count=300, max_labels_count=300)
 
+
+//=====================================================
+// TRENDILO SETTINGS
+//=====================================================
+
+src = input.source(close, "Source")
+
+smooth = input.int(1, "Smoothing", minval=1)
+
+length = input.int(50, "Lookback", minval=1)
+
+almaOffset = input.float(0.85, "ALMA Offset", step=0.01)
+
+sigma = input.int(6, "ALMA Sigma", minval=0)
+
+bmult = input.float(1.0, "Band Multiplier")
+
+customBand = input.bool(false, "Custom Band Length")
+
+customLength = input.int(20, "Custom Band Length")
+
+
+//=====================================================
+// DISPLAY SETTINGS
+//=====================================================
+
+showZone = input.bool(true, "Show Ghost Zone")
+
+showMarkers = input.bool(true, "Show Start/End Markers")
+
+showBackground = input.bool(false, "Show Background")
+
+drawOffset = input.int(
+     -1,
+     "Drawing Candle Offset",
+     minval=-5,
+     maxval=5)
+
+
+//=====================================================
+// TRENDILO CALCULATION
+//=====================================================
+
+pch =
+     ta.change(src, smooth) /
+     src * 100
+
+
+avpch =
+     ta.alma(
+          pch,
+          length,
+          almaOffset,
+          sigma)
+
+
+bandLength =
+     customBand ? customLength : length
+
+
+rms =
+     bmult *
+     math.sqrt(
+          math.sum(
+               avpch * avpch,
+               bandLength)
+          /
+          bandLength)
+
+
+trend =
+     avpch > rms ? 1 :
+     avpch < -rms ? -1 :
+     0
+
+
+
+//=====================================================
+// ZONE STATE
+//=====================================================
+
+buyZone =
+     trend == 1
+
+
+sellZone =
+     trend == -1
+
+
+
+buyStart =
+     buyZone and not buyZone[1]
+
+
+sellStart =
+     sellZone and not sellZone[1]
+
+
+buyEnd =
+     not buyZone and buyZone[1]
+
+
+sellEnd =
+     not sellZone and sellZone[1]
+
+
+
+//=====================================================
+// OFFSET CONTROL
+//=====================================================
+
+zoneBuy =
+     drawOffset == 0 ? buyZone : buyZone[-drawOffset]
+
+
+zoneSell =
+     drawOffset == 0 ? sellZone : sellZone[-drawOffset]
+
+
+startBuy =
+     drawOffset == 0 ? buyStart : buyStart[-drawOffset]
+
+
+startSell =
+     drawOffset == 0 ? sellStart : sellStart[-drawOffset]
+
+
+endBuy =
+     drawOffset == 0 ? buyEnd : buyEnd[-drawOffset]
+
+
+endSell =
+     drawOffset == 0 ? sellEnd : sellEnd[-drawOffset]
+//=====================================================
+// GHOST ZONE DRAWING
+//=====================================================
+
+var line buyLine = na
+var line sellLine = na
+
+
+//=====================================================
+// BUY ZONE
+//=====================================================
+
+if startBuy and showZone
+
+    buyLine := line.new(
+         bar_index + drawOffset,
+         high,
+         bar_index + drawOffset,
+         high,
+         color=color.lime,
+         width=2)
+
+
+
+if zoneBuy and not na(buyLine)
+
+    line.set_x2(
+         buyLine,
+         bar_index + drawOffset)
+
+
+
+if endBuy and not na(buyLine)
+
+    line.set_x2(
+         buyLine,
+         bar_index + drawOffset)
+
+    buyLine := na
+
+
+
+//=====================================================
+// SELL ZONE
+//=====================================================
+
+if startSell and showZone
+
+    sellLine := line.new(
+         bar_index + drawOffset,
+         low,
+         bar_index + drawOffset,
+         low,
+         color=color.red,
+         width=2)
+
+
+
+if zoneSell and not na(sellLine)
+
+    line.set_x2(
+         sellLine,
+         bar_index + drawOffset)
+
+
+
+if endSell and not na(sellLine)
+
+    line.set_x2(
+         sellLine,
+         bar_index + drawOffset)
+
+    sellLine := na
+
+
+
+//=====================================================
+// START / END MARKERS
+//=====================================================
+
+plotshape(
+     showMarkers and startBuy,
+     title="Ghost BUY Start",
+     style=shape.triangleup,
+     location=location.belowbar,
+     color=color.lime,
+     size=size.small)
+
+
+plotshape(
+     showMarkers and startSell,
+     title="Ghost SELL Start",
+     style=shape.triangledown,
+     location=location.abovebar,
+     color=color.red,
+     size=size.small)
+
+
+
+plotshape(
+     showMarkers and endBuy,
+     title="Ghost BUY End",
+     style=shape.xcross,
+     location=location.abovebar,
+     color=color.gray,
+     size=size.tiny)
+
+
+
+plotshape(
+     showMarkers and endSell,
+     title="Ghost SELL End",
+     style=shape.xcross,
+     location=location.belowbar,
+     color=color.gray,
+     size=size.tiny)
+
+
+
+//=====================================================
+// BACKGROUND
+//=====================================================
+
+bgcolor(
+     showBackground and zoneBuy ?
+     color.new(color.lime,90) :
+
+     showBackground and zoneSell ?
+     color.new(color.red,90) :
+
+     na)
+//=====================================================
+// DELTA VOLUME PANDA
+//=====================================================
+
+import TradingView/ta/8
+
+
+//=====================================================
+// DELTA SETTINGS
+//=====================================================
+
+useCustomDeltaTF = input.bool(
+     false,
+     "Use Custom Delta Timeframe")
+
+
+deltaTFInput = input.timeframe(
+     "1",
+     "Delta Timeframe")
+
+showDeltaSignals = input.bool(
+     true,
+     "Show Delta Panda Signals")
+
+
+//=====================================================
+// DELTA TIMEFRAME
+//=====================================================
+
+var lowerTF = switch
+    useCustomDeltaTF => deltaTFInput
+    timeframe.isseconds => "1S"
+    timeframe.isintraday => "1"
+    timeframe.isdaily => "5"
+    => "60"
+
+
+//=====================================================
+// VOLUME DELTA
+//=====================================================
+
+[deltaOpen,
+ deltaHigh,
+ deltaLow,
+ deltaClose] =
+     ta.requestVolumeDelta(lowerTF)
+
+
+
+//=====================================================
+// DELTA CONDITIONS
+//=====================================================
+
+deltaPositive =
+     deltaClose > 0
+
+
+deltaNegative =
+     deltaClose < 0
+
+
+
+//=====================================================
+// BODY CONDITIONS
+//=====================================================
+
+previousBear =
+     close[1] < open[1]
+
+
+previousBull =
+     close[1] > open[1]
+
+
+currentBull =
+     close > open
+
+
+currentBear =
+     close < open
+
+
+
+currentBodyHigh =
+     math.max(open, close)
+
+
+previousBodyHigh =
+     math.max(open[1], close[1])
+
+
+currentBodyLow =
+     math.min(open, close)
+
+
+previousBodyLow =
+     math.min(open[1], close[1])
+
+
+
+//=====================================================
+// PANDA SETUPS
+//=====================================================
+
+pandaBuy =
+     previousBear and
+     currentBull and
+     currentBodyHigh > previousBodyHigh and
+     deltaPositive
+
+
+
+pandaSell =
+     previousBull and
+     currentBear and
+     currentBodyLow < previousBodyLow and
+     deltaNegative
+
+
+
+//=====================================================
+// PANDA SIGNALS
+//=====================================================
+
+plotshape(
+     showDeltaSignals and pandaBuy,
+     title="Delta Panda BUY",
+     style=shape.labelup,
+     location=location.belowbar,
+     text="🐼 BUY",
+     color=color.lime,
+     textcolor=color.white,
+     size=size.small)
+
+
+
+plotshape(
+     showDeltaSignals and pandaSell,
+     title="Delta Panda SELL",
+     style=shape.labeldown,
+     location=location.abovebar,
+     text="🐼 SELL",
+     color=color.red,
+     textcolor=color.white,
+     size=size.small)
+//=====================================================
+// ATR STOP MANAGEMENT
+//=====================================================
+
+showATRStop = input.bool(
+     true,
+     "Show ATR Stop")
+
+
+atrLength = input.int(
+     14,
+     "ATR Length")
+
+
+atrMultiplier = input.float(
+     1.5,
+     "ATR Multiplier",
+     step=0.1)
+
+
+
+atrValue =
+     ta.atr(atrLength)
+
+
+
+stopDistance =
+     atrValue * atrMultiplier
+
+
+
+var float activeStop = na
+
+var line stopLine = na
+
+var int tradeSide = 0
+
+
+
+//=====================================================
+// BUY STOP
+//=====================================================
+
+if pandaBuy
+
+    activeStop :=
+         low - stopDistance
+
+    tradeSide := 1
+
+
+    if showATRStop
+
+        stopLine := line.new(
+             bar_index,
+             activeStop,
+             bar_index + 1,
+             activeStop,
+             color=color.orange,
+             width=2)
+
+
+
+//=====================================================
+// SELL STOP
+//=====================================================
+
+if pandaSell
+
+    activeStop :=
+         high + stopDistance
+
+    tradeSide := -1
+
+
+    if showATRStop
+
+        stopLine := line.new(
+             bar_index,
+             activeStop,
+             bar_index + 1,
+             activeStop,
+             color=color.orange,
+             width=2)
+
+
+
+//=====================================================
+// EXTEND STOP LINE
+//=====================================================
+
+if not na(stopLine)
+
+    line.set_x2(
+         stopLine,
+         bar_index)
+
+
+
+//=====================================================
+// STOP HIT RESET
+//=====================================================
+
+buyStopHit =
+     tradeSide == 1 and
+     low <= activeStop
+
+
+sellStopHit =
+     tradeSide == -1 and
+     high >= activeStop
+
+
+
+if buyStopHit or sellStopHit
+
+    activeStop := na
+
+    tradeSide := 0
+
+
+    if not na(stopLine)
+
+        line.delete(stopLine)
+
+        stopLine := na
+
+
+
+//=====================================================
+// STOP DISPLAY
+//=====================================================
+
+plot(
+     showATRStop ? activeStop : na,
+     title="ATR Stop",
+     color=color.orange,
+     style=plot.style_linebr)
+//=====================================================
+// ALERTS
+//=====================================================
+
+
+// Delta Panda Alerts
+
+alertcondition(
+     pandaBuy and barstate.isconfirmed,
+     title="🐼 Delta Panda BUY",
+     message="🐼 Delta Panda BUY | {{ticker}} | TF {{interval}} | Price {{close}}")
+
+
+alertcondition(
+     pandaSell and barstate.isconfirmed,
+     title="🐼 Delta Panda SELL",
+     message="🐼 Delta Panda SELL | {{ticker}} | TF {{interval}} | Price {{close}}")
+
+
+
+// Ghost Trendilo Alerts
+
+alertcondition(
+     startBuy and barstate.isconfirmed,
+     title="🐼 Ghost Trendilo BUY Zone",
+     message="🐼 Ghost Trendilo BUY Zone Started | {{ticker}} | TF {{interval}}")
+
+
+alertcondition(
+     startSell and barstate.isconfirmed,
+     title="🐼 Ghost Trendilo SELL Zone",
+     message="🐼 Ghost Trendilo SELL Zone Started | {{ticker}} | TF {{interval}}")
+
+
+
+//=====================================================
+// DELTA INFORMATION (OPTIONAL)
+//=====================================================
+
+showDeltaValue = input.bool(
+     false,
+     "Show Delta Value")
+
+
+deltaColor =
+     deltaClose > 0 ?
+     color.lime :
+     deltaClose < 0 ?
+     color.red :
+     color.gray
+
+
+
+plot(
+     showDeltaValue ? deltaClose : na,
+     title="Volume Delta",
+     style=plot.style_columns,
+     color=deltaColor)
+
+
+
+//=====================================================
+// TRENDILO DATA WINDOW
+//=====================================================
+
+plot(
+     avpch,
+     title="Trendilo Value",
+     display=display.data_window)
+
+
+plot(
+     rms,
+     title="Trendilo Upper",
+     display=display.data_window)
+
+
+plot(
+     -rms,
+     title="Trendilo Lower",
+     display=display.data_window)
+
+
+
+//=====================================================
+// VOLUME CHECK
+//=====================================================
+
+var totalVolume = 0.0
+
+totalVolume += nz(volume)
+
+
+if barstate.islast and totalVolume == 0
+
+    runtime.error(
+         "This symbol does not provide volume data.")
+
+
+
+//=====================================================
+// END OF DELTA VOLUME PANDA + GHOST TRENDILO
+//=====================================================
